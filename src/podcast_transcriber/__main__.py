@@ -351,10 +351,10 @@ def _cmd_summarize(args: argparse.Namespace) -> int:
         backend=config.SUMMARY_BACKEND,
     )
 
-    print(f"Sections: deep_dives={len(summary.deep_dives)} "
-          f"quick_hits={len(summary.quick_hits)} insights={len(summary.insights)} "
-          f"actions={len(summary.actions)} resources={len(summary.resources)}  "
-          f"tags={len(summary.tags)}  language={summary.language}")
+    print(f"Sections: topics={len(summary.topics)} "
+          f"insights={len(summary.insights)} actions={len(summary.actions)} "
+          f"resources={len(summary.resources)}  tags={len(summary.tags)}  "
+          f"language={summary.language}")
     print(f"Theme: {summary.theme[:120]}{'…' if len(summary.theme) > 120 else ''}")
     print(f"PDF  -> {pdf_path}")
     store.update(ep_id, summary_json_path=str(json_path),

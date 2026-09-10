@@ -41,8 +41,7 @@ class Summary:
     theme: str                       # ~50-word teaser (also opens the delivery email)
     guests: str = ""                 # guest/host names, if identifiable
     tags: list[str] = field(default_factory=list)              # topic tags for Notion filtering
-    deep_dives: list[dict[str, str]] = field(default_factory=list)   # {heading, body} — major topics
-    quick_hits: list[dict[str, str]] = field(default_factory=list)   # {topic, takeaway} — minor/news items
+    topics: list[dict[str, str]] = field(default_factory=list)       # {heading, body} — EVERY topic, depth scaled
     insights: list[dict[str, Any]] = field(default_factory=list)     # {text, is_quote, explanation}
     actions: list[dict[str, str]] = field(default_factory=list)      # {kind: apply|read, text}
     resources: list[dict[str, str]] = field(default_factory=list)    # {title, author, description}
@@ -66,28 +65,27 @@ engagingly, never academic or hype-y. Do NOT invent anything: every claim must
 be grounded in what was actually said. Where you add a brief "why it matters"
 note, keep it short and clearly derived from the episode, not outside opinion.
 
-ADAPT THE DEPTH TO THE EPISODE'S SHAPE — this is the most important rule:
-- If the episode is a flowing conversation where several topics carry roughly
-  equal weight, give each of those topics its own in-depth section, covered
-  evenly.
-- If the episode is news/updates-style (many short items plus a few bigger
-  stories), DEEP-DIVE only the genuinely major topics, and put the smaller
-  news items in "quick_hits" (one crisp takeaway each) rather than inflating
-  them. Judge which topics are major vs minor from how much time and substance
-  the hosts actually give them.
-Let the overall length scale with how much substance the episode really had —
-do not pad a thin episode or crush a rich one.
+COVER EVERY TOPIC, SCALE THE DEPTH — this is the most important rule:
+- Include EVERY distinct topic, story, or segment the hosts actually discuss.
+  Do not omit any, and do not merge unrelated topics. Follow the episode's own
+  order/flow. The reader must be able to grasp the essence of every topic
+  without listening to the audio.
+- Scale each topic's depth to how much time and substance it got. A topic
+  discussed at length (say ~30 minutes) deserves a rich, multi-point paragraph
+  (or two) with the specifics, examples, and nuances. A topic touched only
+  briefly (say ~5 minutes) still gets a solid 2-4 sentence paragraph that
+  captures its core plus any genuinely interesting detail — NEVER a single
+  throwaway line, and never dropped entirely.
+- Do not pad a thin topic or crush a rich one; let each find its natural
+  length. The overall summary length therefore scales with the episode.
 
 Produce these fields:
 
-- "deep_dives": the major topics. Each has a short punchy heading and one rich
-  paragraph that explains the core idea, keeps concrete specifics (names,
-  numbers, companies, models, studies, examples), and may end with a brief,
-  grounded "why it matters". Use as many as the episode's major topics warrant.
-
-- "quick_hits": minor items / short news mentions that deserve recording but
-  not a deep dive. Each is a short "topic" plus a one-line "takeaway". Use an
-  empty list for a conversational episode that has no such minor items.
+- "topics": one entry per topic discussed, in the episode's order. Each has a
+  short, informative heading and a paragraph whose depth scales as described
+  above. Keep concrete specifics (names, numbers, companies, models, studies,
+  examples). A paragraph may end with a brief, grounded "why it matters" where
+  it genuinely adds insight — but coverage of the topic itself comes first.
 
 - "insights": the memorable quotes and key takeaways. For a near-verbatim quote
   set is_quote=true and put the quote in "text"; for a concept/label set
@@ -121,8 +119,7 @@ Return ONLY a JSON object (no prose, no markdown fences) with exactly these keys
   "theme": "<~50 words>",
   "guests": "<names or empty>",
   "tags": ["<topic>", "..."],
-  "deep_dives": [ { "heading": "<...>", "body": "<...>" } ],
-  "quick_hits": [ { "topic": "<...>", "takeaway": "<...>" } ],
+  "topics": [ { "heading": "<...>", "body": "<...>" } ],
   "insights": [ { "text": "<quote or label>", "is_quote": true, "explanation": "<...>" } ],
   "actions": [ { "kind": "apply", "text": "<...>" } ],
   "resources": [ { "title": "<...>", "author": "<...>", "description": "<...>" } ]
@@ -175,13 +172,21 @@ def _parse_summary_json(raw: str, *, fallback_language: str | None) -> Summary:
     guests = data.get("guests")
     if not guests and isinstance(data.get("header"), dict):
         guests = data["header"].get("guests", "")
+
+    # "topics" is the current key. Fall back to older shapes (deep_dives +
+    # quick_hits, or part1) so a stray old-format reply still renders.
+    topics = data.get("topics") or data.get("part1")
+    if topics is None:
+        topics = list(data.get("deep_dives", []) or [])
+        topics += [{"heading": q.get("topic", ""), "body": q.get("takeaway", "")}
+                   for q in (data.get("quick_hits", []) or [])]
+
     return Summary(
         language=data.get("language") or fallback_language or "unknown",
         theme=data.get("theme", ""),
         guests=guests or "",
         tags=data.get("tags", []) or [],
-        deep_dives=data.get("deep_dives", []) or [],
-        quick_hits=data.get("quick_hits", []) or [],
+        topics=topics or [],
         insights=data.get("insights", []) or [],
         actions=data.get("actions", []) or [],
         resources=data.get("resources", []) or [],

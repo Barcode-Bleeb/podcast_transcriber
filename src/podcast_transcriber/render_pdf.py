@@ -33,20 +33,18 @@ _INK = (30, 30, 30)         # near-black body text
 # are navigational chrome set by our code, not by the model.
 _LABELS = {
     "en": {
-        "deep_dives": "DEEP DIVES",
-        "quick_hits": "QUICK HITS",
+        "topics": "EPISODE SUMMARY",
         "insights": "KEY INSIGHTS & QUOTES",
         "actions": "TO APPLY & EXPLORE",
         "resources": "RESOURCES & REFERENCES",
         "apply": "Apply", "read": "Read", "tags": "Tags", "with": "with",
     },
     "nl": {
-        "deep_dives": "VERDIEPING",
-        "quick_hits": "KORT NIEUWS",
+        "topics": "SAMENVATTING PER ONDERWERP",
         "insights": "INZICHTEN & CITATEN",
         "actions": "OM TOE TE PASSEN & TE VERKENNEN",
         "resources": "BRONNEN & VERWIJZINGEN",
-        "apply": "Toepassen", "read": "Lezen", "tags": "Tags", "met": "met",
+        "apply": "Toepassen", "read": "Lezen", "tags": "Tags", "with": "met",
     },
 }
 
@@ -146,25 +144,12 @@ def render_summary_pdf(summary: Summary, *, show_name: str, episode_title: str,
         pdf.multi_cell(0, 5, _san(f"{L['tags']}: " + "  ·  ".join(summary.tags)),
                        new_x="LMARGIN", new_y="NEXT")
 
-    # --- Deep dives ---
-    if summary.deep_dives:
-        _bar(pdf, L["deep_dives"])
-        for item in summary.deep_dives:
+    # --- Topics (every topic, depth scaled by the model) ---
+    if summary.topics:
+        _bar(pdf, L["topics"])
+        for item in summary.topics:
             _heading(pdf, item.get("heading", ""))
             _body(pdf, item.get("body", ""))
-
-    # --- Quick hits ---
-    if summary.quick_hits:
-        _bar(pdf, L["quick_hits"])
-        for item in summary.quick_hits:
-            topic = item.get("topic", "")
-            take = item.get("takeaway", "")
-            pdf.set_font("Helvetica", "B", 10.5)
-            pdf.set_text_color(*_INK)
-            pdf.multi_cell(0, 5.4, _san(f"- {topic}"), new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", "", 10.5)
-            pdf.multi_cell(0, 5.4, _san(f"   {take}"), new_x="LMARGIN", new_y="NEXT")
-            pdf.ln(1)
 
     # --- Insights & quotes ---
     if summary.insights:
