@@ -39,9 +39,10 @@ writes `summaries/<id>.json` and a styled `summaries/<id>.pdf`.
   their products. Podcast transcripts aren't private data, but you should know
   the transcript text leaves your machine for this step (unlike transcription,
   which is fully local).
-- **Model name drift.** The default is `GEMINI_MODEL=gemini-2.5-flash`. Free-tier
-  model names change over time; if you get a "model not found" error, set a
-  different one in `.env` (the AI Studio site lists what your key can use).
+- **Model name drift.** The default is `GEMINI_MODEL=gemini-3.6-flash`. Free-tier
+  model names change over time; if you get a 404 "model not found" error, the
+  message usually names the replacement — set it in `.env` (or pass
+  `--model <name>`). The AI Studio site also lists what your key can use.
 - **Language.** Summaries are written in the podcast's own language (Dutch stays
   Dutch), so quotes remain the speakers' actual words.
 - **Swappable.** The backend is pluggable (`SUMMARY_BACKEND`). We can add a paid
