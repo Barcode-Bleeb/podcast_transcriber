@@ -1,11 +1,13 @@
-"""Spotify authorization and recently-played fetching.
+"""Spotify authorization and episode detection.
 
 This module does two jobs:
 
 1. Handle the one-time OAuth "handshake" so we can talk to Spotify on your
    behalf, and transparently refresh the token forever after.
-2. Fetch your recently-played items and normalize the podcast episodes into a
-   simple, pipeline-friendly shape.
+2. Poll the "what's playing right now" endpoint to catch podcast episodes as
+   you listen, and normalize them into a simple, pipeline-friendly shape.
+   (A recently-played helper remains as a diagnostic only — that endpoint was
+   confirmed to return music tracks but never podcast episodes.)
 
 --------------------------------------------------------------------------
 A note on OAuth, in everyday terms
@@ -79,8 +81,63 @@ def authorize() -> None:
 
 
 # --------------------------------------------------------------------------
-# Fetching + normalizing recently-played items
+# Now playing — the PRIMARY trigger
 # --------------------------------------------------------------------------
+# Spotify's "what's playing right now" endpoint CAN return podcast episodes,
+# but only if we explicitly ask by passing additional_types="episode". Without
+# that flag it silently reports only music — the same trap that makes
+# recently-played useless for us. We always pass it.
+
+def _episode_from_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Shape a raw Spotify episode object into our tidy record."""
+    show = item.get("show") or {}
+    return {
+        "episode_id": item.get("id"),
+        "title": item.get("name"),
+        "show_name": show.get("name"),
+        "description": item.get("description", ""),
+        "duration_ms": item.get("duration_ms"),
+        "release_date": item.get("release_date"),
+        "spotify_url": (item.get("external_urls") or {}).get("spotify"),
+    }
+
+
+def fetch_now_playing() -> dict[str, Any] | None:
+    """Return the raw currently-playing response, or None if nothing plays.
+
+    The endpoint returns HTTP 204 (no content) when nothing is playing, which
+    spotipy surfaces as None — so a None here simply means 'silence right now'.
+    """
+    client = get_client()
+    return client.currently_playing(additional_types="episode")
+
+
+def now_playing_episode(
+    response: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, int | None]:
+    """Extract the playing episode (and playback progress) from a response.
+
+    Returns (episode_record, progress_ms). Both are None when what's playing
+    isn't a podcast episode — e.g. music, an ad, or nothing at all — which lets
+    the caller skip with a simple truthiness check.
+    """
+    if not response:
+        return None, None
+    if response.get("currently_playing_type") != "episode":
+        return None, None
+    item = response.get("item") or {}
+    if not item.get("id"):
+        return None, None
+    return _episode_from_item(item), response.get("progress_ms")
+
+
+# --------------------------------------------------------------------------
+# Recently-played — kept only as a diagnostic
+# --------------------------------------------------------------------------
+# We confirmed empirically that this endpoint returns only music tracks for
+# real accounts, so it is NOT part of the live trigger. It stays because
+# `fetch` is a handy way to prove authorization works and to re-check whether
+# Spotify ever starts including episodes here.
 
 def fetch_recently_played(limit: int = 50) -> list[dict[str, Any]]:
     """Return the raw 'items' list from Spotify's recently-played endpoint.

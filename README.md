@@ -10,7 +10,7 @@ Built and tested on a PC first; eventual home is an always-on Raspberry Pi 5.
 
 | # | Stage | Status |
 |---|-------|--------|
-| 1 | **Trigger** — poll Spotify recently-played, filter episodes, dedupe | 🟢 in progress (this checkpoint) |
+| 1 | **Trigger** — poll Spotify *now-playing* for episodes, queue + dedupe | 🟢 working (this checkpoint) |
 | 2 | **Fetch** — find the show's RSS feed, download the audio | ⚪ not started |
 | 3 | **Transcribe** — local `whisper.cpp`, `small` model | ⚪ not started |
 | 4 | **Summarize** — 3-section format → PDF | ⚪ not started |
@@ -22,12 +22,17 @@ Built and tested on a PC first; eventual home is an always-on Raspberry Pi 5.
 pip install -r requirements.txt
 cp .env.example .env          # then paste in your Spotify keys
 
-python -m podcast_transcriber authorize        # one-time, interactive
-python -m podcast_transcriber fetch --raw       # list new episodes + dump raw
+python -m podcast_transcriber authorize                 # one-time, interactive
+python -m podcast_transcriber poll                       # record what's playing now
+python -m podcast_transcriber poll --watch --interval 60 # loop (Ctrl+C to stop)
+python -m podcast_transcriber queue                      # show the backlog
 ```
 
-Full click-by-click Spotify instructions — including creating the developer
-app and an important caveat about whether episodes appear at all — are in
+The trigger polls Spotify's **now-playing** endpoint, because recently-played
+returns only music, never podcast episodes. On the Pi this runs as a
+per-minute cron job; episodes land in `data/episodes.json`, deduped.
+
+Full click-by-click Spotify instructions are in
 [`docs/spotify-setup.md`](docs/spotify-setup.md).
 
 ## Layout
@@ -35,8 +40,8 @@ app and an important caveat about whether episodes appear at all — are in
 ```
 src/podcast_transcriber/
   config.py           # paths + secrets from environment / .env
-  spotify_client.py   # OAuth handshake + recently-played fetching
-  store.py            # JSON ledger of already-processed episode IDs
+  spotify_client.py   # OAuth handshake + now-playing episode detection
+  store.py            # JSON episode ledger (queue + processed, deduped)
   __main__.py         # `python -m podcast_transcriber ...` CLI
 data/                 # local runtime data (git-ignored: tokens, ledger, dumps)
 docs/                 # setup guides

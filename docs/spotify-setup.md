@@ -67,28 +67,46 @@ session. No graphical browser on the Pi is required.
 
 ---
 
-## 4. The big question: does recently-played even include episodes?
+## 4. How the trigger actually works (and why not recently-played)
 
-⚠️ **Please read this before we build the rest of the pipeline.**
+We tested it: Spotify's `recently-played` endpoint returns **only music
+tracks — never podcast episodes** (still true in 2026). You can reconfirm this
+any time with the diagnostic `python -m podcast_transcriber fetch --raw`.
 
-Spotify's `recently-played` endpoint has, for years, returned **only music
-tracks — not podcast episodes**. Whether that is still true in 2026 is
-something I could not verify with certainty, so we test it directly:
+So the live trigger instead polls the **"what's playing right now"** endpoint,
+which *can* return episodes (we pass an explicit `additional_types=episode`
+flag; without it, episodes are hidden — the same trap). This directly observes
+what you actually listen to.
+
+### Verify it detects episodes
+
+1. On any device signed into the same Spotify account, **start playing a
+   podcast episode** and leave it playing.
+2. On the PC, run a single check:
+   ```bash
+   python -m podcast_transcriber poll
+   ```
+   You should see a line like
+   `Episode playing [NEW]: <Show> — <Episode> (at ~N min)`.
+3. Confirm it was recorded:
+   ```bash
+   python -m podcast_transcriber queue
+   ```
+
+If `poll` says "No episode playing" while an episode really is playing, tell
+Claude — a couple of accounts need `additional_types` handled slightly
+differently, and we'll adjust.
+
+### The tradeoff to understand
+
+"What's playing right now" is a *snapshot* — it only reports the instant you
+ask. To turn snapshots into reliable history you must poll **often**. On the
+always-on Pi that's a cron job every minute; on your PC for testing you can
+loop in the foreground:
 
 ```bash
-python -m podcast_transcriber fetch --raw
+python -m podcast_transcriber poll --watch --interval 60   # Ctrl+C to stop
 ```
 
-- If it lists your recent podcast episodes: 🎉 the plan works as designed.
-- If it says "No podcast EPISODES found": open the newest file in `data/raw/`
-  and check the `track.type` values. If they're all `"track"`, the limitation
-  still holds and we need a **fallback trigger**. Options we can discuss:
-  - **`user-read-playback-state` / currently-playing polling** — catch episodes
-    while they play (needs the pipeline running frequently).
-  - **A "podcasts I follow / saved episodes" poll** — trigger on newly
-    available episodes of shows you follow, rather than on listen history.
-  - **A manual trigger** — you drop an episode URL/ID into a watched file.
-
-Either way, everything downstream (fetch → transcribe → summarize → deliver)
-is unchanged; only *how we notice an episode* would adapt. That's exactly why
-we validated this foundation first.
+Everything downstream (fetch → transcribe → summarize → deliver) reads from the
+same `data/episodes.json` queue and is unaffected by this choice.

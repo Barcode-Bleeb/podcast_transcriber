@@ -7,6 +7,8 @@ data/*.token.json
 # --- Local runtime data ----------------------------------------------------
 # Processed-episode tracking, downloaded audio, transcripts, generated PDFs.
 # These are machine-local; they should not live in git.
+data/episodes.json
+data/episodes.json.tmp
 data/processed_episodes.json
 data/raw/
 audio/
