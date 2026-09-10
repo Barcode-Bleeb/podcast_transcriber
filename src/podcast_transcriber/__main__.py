@@ -179,7 +179,11 @@ def _cmd_download(args: argparse.Namespace) -> int:
 
     # --- Step 3: download -------------------------------------------------
     print(f"Downloading audio:\n  {audio_url}")
-    dest = audio_fetch.download_audio(audio_url, dest_basename=ep_id)
+    try:
+        dest = audio_fetch.download_audio(audio_url, dest_basename=ep_id)
+    except audio_fetch.AudioDownloadError as exc:
+        print(f"\nDownload failed.\n{exc}")
+        return 1
     size_mb = dest.stat().st_size / (1024 * 1024)
     print(f"Saved {size_mb:.1f} MB -> {dest}")
 
