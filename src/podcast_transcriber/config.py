@@ -37,6 +37,14 @@ EPISODES_FILE = DATA_DIR / "episodes.json"
 # inspecting exactly what Spotify returns for your account.
 RAW_DUMP_DIR = DATA_DIR / "raw"
 
+# Downloaded episode audio (Stage 2). Git-ignored — these files are large and
+# machine-local.
+AUDIO_DIR = PROJECT_ROOT / "audio"
+
+# A polite User-Agent for our outbound HTTP requests. Some podcast hosts reject
+# the default "python-requests/..." agent, so we identify ourselves clearly.
+HTTP_USER_AGENT = "podcast-transcriber/0.1 (+personal podcast pipeline)"
+
 
 # --- Spotify credentials ---------------------------------------------------
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")

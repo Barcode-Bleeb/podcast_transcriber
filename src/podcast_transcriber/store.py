@@ -121,6 +121,16 @@ class EpisodeStore:
         self._save()
         return is_new
 
+    def update(self, episode_id: str, **fields: Any) -> None:
+        """Merge arbitrary fields into an episode record (e.g. feed/audio info)."""
+        record = self._records.get(episode_id, {"episode_id": episode_id})
+        record.update(fields)
+        self._records[episode_id] = record
+        self._save()
+
+    def get(self, episode_id: str) -> dict | None:
+        return self._records.get(episode_id)
+
     def mark_processed(self, episode_id: str) -> None:
         """Stamp an episode as fully handled so it's never processed again."""
         record = self._records.get(episode_id, {"episode_id": episode_id})

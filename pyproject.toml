@@ -10,6 +10,10 @@ requires-python = ">=3.10"
 dependencies = [
     "spotipy==2.24.0",
     "python-dotenv==1.0.1",
+    "feedparser==6.0.14",   # Parses podcast RSS feeds (Stage 2). 6.0.14 ships
+                            # a pure-wheel sgmllib, avoiding a source build that
+                            # needs a compiler (a real gotcha on Windows/Pi).
+    "requests>=2.32.0",     # HTTP for feed discovery + audio download.
 ]
 
 [project.scripts]

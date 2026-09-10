@@ -18,6 +18,11 @@ Run everything from the project root.
     python -m podcast_transcriber queue
         Show episodes detected but not yet processed (the pipeline's backlog).
 
+    python -m podcast_transcriber download
+        Stage 2. Take the oldest queued episode, find the show's RSS feed,
+        match the episode, and download its audio into audio/. Overrides:
+        --id, --show, --feed-url, --audio-url, --yes.
+
     python -m podcast_transcriber fetch --raw
         DIAGNOSTIC ONLY. Dump recently-played to prove auth works and to
         re-check whether Spotify ever starts including episodes there (it
@@ -31,7 +36,7 @@ import json
 import time
 from datetime import datetime, timezone
 
-from . import config, spotify_client
+from . import audio_fetch, config, feed_finder, spotify_client
 from .store import EpisodeStore
 
 
@@ -101,6 +106,89 @@ def _cmd_queue(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _pick_target(store: EpisodeStore, episode_id: str | None) -> dict | None:
+    """Choose which episode to download: an explicit --id, else oldest pending
+    that has no audio yet."""
+    if episode_id:
+        return store.get(episode_id)
+    candidates = [
+        e for e in store.pending() if not e.get("audio_path")
+    ]
+    candidates.sort(key=lambda e: e.get("first_detected", ""))
+    return candidates[0] if candidates else None
+
+
+def _cmd_download(args: argparse.Namespace) -> int:
+    store = EpisodeStore(config.EPISODES_FILE)
+    episode = _pick_target(store, args.id)
+    if episode is None:
+        print("Nothing to download (no pending episode without audio). "
+              "Run `poll` while an episode plays, or pass --id.")
+        return 1
+
+    ep_id = episode["episode_id"]
+    print(f"Target: {episode.get('show_name')} — {episode.get('title')}")
+
+    # --- Step 1: find the RSS feed (unless one was given) ------------------
+    feed_url = args.feed_url
+    if not feed_url and not args.audio_url:
+        show = args.show or episode.get("show_name") or ""
+        print(f"Searching Apple's directory for feed of: {show!r}")
+        results = feed_finder.rank_candidates(
+            show, feed_finder.search_podcasts(show)
+        )
+        if not results:
+            print("No feeds found. Try `--show \"Exact Show Name\"` or pass "
+                  "`--feed-url <url>` directly.")
+            return 1
+        print("Top feed candidates (name-match score):")
+        for c in results[:5]:
+            print(f"  {c['score']:.2f}  {c['show_name']}  <{c['feed_url']}>")
+        best = results[0]
+        if best["score"] < 0.6 and not args.yes:
+            print(f"\nBest match scored only {best['score']:.2f} — not confident.\n"
+                  "If the top candidate above is right, re-run with --yes, or "
+                  "pass --feed-url <url>.")
+            return 1
+        feed_url = best["feed_url"]
+        print(f"Using feed: {feed_url}")
+
+    # --- Step 2: match the episode within the feed ------------------------
+    audio_url = args.audio_url
+    if not audio_url:
+        print("Parsing feed and matching the episode by title...")
+        feed = audio_fetch.parse_feed(feed_url)
+        if not feed.entries:
+            print("Feed parsed but has no entries. Wrong feed? Try --feed-url.")
+            return 1
+        matches = audio_fetch.match_episode(feed, episode.get("title", ""))
+        print("Best episode matches (title-match score):")
+        for m in matches:
+            print(f"  {m['score']:.2f}  {m['title']}")
+        best = matches[0]
+        if best["score"] < 0.5 and not args.yes:
+            print(f"\nBest episode match scored only {best['score']:.2f} — not "
+                  "confident. Re-run with --yes to accept it, or pass "
+                  "--audio-url <url>.")
+            return 1
+        audio_url = best["audio_url"]
+        if not audio_url:
+            print("Matched an episode but it has no downloadable audio "
+                  "enclosure. Pass --audio-url if you can find it manually.")
+            return 1
+
+    # --- Step 3: download -------------------------------------------------
+    print(f"Downloading audio:\n  {audio_url}")
+    dest = audio_fetch.download_audio(audio_url, dest_basename=ep_id)
+    size_mb = dest.stat().st_size / (1024 * 1024)
+    print(f"Saved {size_mb:.1f} MB -> {dest}")
+
+    store.update(ep_id, feed_url=feed_url, audio_url=audio_url,
+                 audio_path=str(dest))
+    print("Ledger updated. Ready for Stage 3 (transcription).")
+    return 0
+
+
 def _cmd_fetch(args: argparse.Namespace) -> int:
     items = spotify_client.fetch_recently_played(limit=args.limit)
     print(f"Spotify returned {len(items)} recently-played item(s).")
@@ -157,6 +245,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_queue = sub.add_parser("queue", help="List episodes awaiting processing.")
     p_queue.set_defaults(func=_cmd_queue)
+
+    p_dl = sub.add_parser("download", help="Find RSS feed + download episode audio.")
+    p_dl.add_argument("--id", help="Episode ID to download (default: oldest pending).")
+    p_dl.add_argument("--show", help="Override the show name used for feed search.")
+    p_dl.add_argument("--feed-url", dest="feed_url",
+                      help="Skip discovery; use this RSS feed URL directly.")
+    p_dl.add_argument("--audio-url", dest="audio_url",
+                      help="Skip matching; download this audio URL directly.")
+    p_dl.add_argument("--yes", action="store_true",
+                      help="Accept the best match even if confidence is low.")
+    p_dl.set_defaults(func=_cmd_download)
 
     p_fetch = sub.add_parser("fetch", help="Diagnostic: dump recently-played.")
     p_fetch.add_argument("--limit", type=int, default=50,

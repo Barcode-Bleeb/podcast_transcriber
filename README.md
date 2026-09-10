@@ -11,7 +11,7 @@ Built and tested on a PC first; eventual home is an always-on Raspberry Pi 5.
 | # | Stage | Status |
 |---|-------|--------|
 | 1 | **Trigger** — poll Spotify *now-playing* for episodes, queue + dedupe | 🟢 working (this checkpoint) |
-| 2 | **Fetch** — find the show's RSS feed, download the audio | ⚪ not started |
+| 2 | **Fetch** — find the show's RSS feed, download the audio | 🟢 built (verify on your machine) |
 | 3 | **Transcribe** — local `whisper.cpp`, `small` model | ⚪ not started |
 | 4 | **Summarize** — 3-section format → PDF | ⚪ not started |
 | 5 | **Deliver** — email PDF + create Notion page | ⚪ not started |
@@ -34,6 +34,24 @@ per-minute cron job; episodes land in `data/episodes.json`, deduped.
 
 Full click-by-click Spotify instructions are in
 [`docs/spotify-setup.md`](docs/spotify-setup.md).
+
+## Stage 2 — download an episode's audio
+
+```bash
+python -m podcast_transcriber download            # oldest queued episode
+```
+
+Spotify never exposes the real audio file, so this looks the show up in
+Apple's free podcast directory to find its public **RSS feed**, matches the
+episode by title, and streams the MP3 into `audio/`. It prints its confidence
+at each step so you can catch a wrong guess. Overrides when a name is ambiguous:
+
+```bash
+python -m podcast_transcriber download --show "Exact Show Name"
+python -m podcast_transcriber download --feed-url https://…/feed.xml
+python -m podcast_transcriber download --audio-url https://…/episode.mp3
+python -m podcast_transcriber download --yes        # accept a low-confidence match
+```
 
 ## Layout
 
