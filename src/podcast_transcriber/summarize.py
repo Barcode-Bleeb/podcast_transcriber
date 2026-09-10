@@ -22,10 +22,16 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from . import config
+
+# HTTP status codes that mean "try again shortly" rather than "you did something
+# wrong": rate limiting (429) and transient server-side load (5xx). Google's
+# free tier returns 503 during demand spikes, which is exactly what we retry.
+_RETRYABLE_CODES = {429, 500, 502, 503, 504}
 
 
 @dataclass
@@ -138,7 +144,7 @@ def summarize_transcript(transcript: str, *, show_name: str, episode_title: str,
     return _parse_summary_json(raw, fallback_language=language)
 
 
-def _call_gemini(prompt: str, *, model: str) -> str:
+def _call_gemini(prompt: str, *, model: str, max_retries: int = 5) -> str:
     """Send the prompt to Gemini and return the raw text (expected: JSON)."""
     if not config.GEMINI_API_KEY:
         raise RuntimeError(
@@ -148,7 +154,7 @@ def _call_gemini(prompt: str, *, model: str) -> str:
         )
     try:
         from google import genai
-        from google.genai import types
+        from google.genai import errors, types
     except ImportError as exc:  # pragma: no cover - depends on optional install
         raise RuntimeError(
             "The Gemini SDK isn't installed. Install the optional extra:\n"
@@ -156,14 +162,45 @@ def _call_gemini(prompt: str, *, model: str) -> str:
         ) from exc
 
     client = genai.Client(api_key=config.GEMINI_API_KEY)
-    # response_mime_type asks Gemini to emit JSON directly, which pairs with our
-    # JSON-shaped prompt for reliable parsing.
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.4,
+    gen_config = types.GenerateContentConfig(
+        # response_mime_type asks Gemini to emit JSON directly, which pairs with
+        # our JSON-shaped prompt for reliable parsing.
+        response_mime_type="application/json",
+        temperature=0.4,
+        # We define no tools, so silence the SDK's automatic-function-calling
+        # notice.
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(
+            disable=True
         ),
     )
-    return response.text or ""
+
+    # Retry transient failures (rate limits, server load) with exponential
+    # backoff, so an unattended overnight run rides out a demand spike instead
+    # of failing. Non-transient errors (bad key, bad model) fail immediately.
+    delay = 5.0
+    last_exc: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client.models.generate_content(
+                model=model, contents=prompt, config=gen_config,
+            )
+            return response.text or ""
+        except errors.APIError as exc:
+            code = getattr(exc, "code", None)
+            if code not in _RETRYABLE_CODES:
+                raise RuntimeError(
+                    f"Gemini rejected the request (code {code}): "
+                    f"{getattr(exc, 'message', exc)}"
+                ) from exc
+            last_exc = exc
+            if attempt < max_retries:
+                print(f"  Gemini busy (code {code}), attempt {attempt}/"
+                      f"{max_retries}; retrying in {int(delay)}s…")
+                time.sleep(delay)
+                delay = min(delay * 2, 60.0)
+
+    raise RuntimeError(
+        "Gemini stayed unavailable after several retries — this is a Google-"
+        "side load spike, not your setup. The episode is still queued; just "
+        "run `summarize` again in a few minutes."
+    ) from last_exc
