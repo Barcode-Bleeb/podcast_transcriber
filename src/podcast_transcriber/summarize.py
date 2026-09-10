@@ -38,11 +38,14 @@ _RETRYABLE_CODES = {429, 500, 502, 503, 504}
 @dataclass
 class Summary:
     language: str
-    theme: str                       # ~50-word teaser (opens the delivery email)
-    header: dict[str, Any]           # guests, etc. (show/title/date come from the ledger)
-    part1: list[dict[str, str]] = field(default_factory=list)  # {heading, body}
-    part2: list[dict[str, Any]] = field(default_factory=list)  # {text, is_quote, explanation}
-    part3: list[dict[str, str]] = field(default_factory=list)  # {title, author, description}
+    theme: str                       # ~50-word teaser (also opens the delivery email)
+    guests: str = ""                 # guest/host names, if identifiable
+    tags: list[str] = field(default_factory=list)              # topic tags for Notion filtering
+    deep_dives: list[dict[str, str]] = field(default_factory=list)   # {heading, body} — major topics
+    quick_hits: list[dict[str, str]] = field(default_factory=list)   # {topic, takeaway} — minor/news items
+    insights: list[dict[str, Any]] = field(default_factory=list)     # {text, is_quote, explanation}
+    actions: list[dict[str, str]] = field(default_factory=list)      # {kind: apply|read, text}
+    resources: list[dict[str, str]] = field(default_factory=list)    # {title, author, description}
 
 
 # --------------------------------------------------------------------------
@@ -56,31 +59,59 @@ class Summary:
 #     parsing or the layout.
 # --------------------------------------------------------------------------
 DEFAULT_INSTRUCTIONS = """\
-You are an expert podcast note-taker. Summarize the transcript into a structured
-JSON object matching this three-part format.
+You are an expert podcast note-taker. Turn the transcript into a faithful,
+searchable summary as a structured JSON object. It will be re-read months later
+as a memory aid, so accuracy matters more than flourish. Write clearly and
+engagingly, never academic or hype-y. Do NOT invent anything: every claim must
+be grounded in what was actually said. Where you add a brief "why it matters"
+note, keep it short and clearly derived from the episode, not outside opinion.
 
-PART 1 — Episode summary: 8 to 12 thematic sections. Each has a short, punchy
-heading and one rich paragraph. Together the paragraphs total 600-900 words.
-Preserve concrete details: named studies, numbers, vivid examples, frameworks.
+ADAPT THE DEPTH TO THE EPISODE'S SHAPE — this is the most important rule:
+- If the episode is a flowing conversation where several topics carry roughly
+  equal weight, give each of those topics its own in-depth section, covered
+  evenly.
+- If the episode is news/updates-style (many short items plus a few bigger
+  stories), DEEP-DIVE only the genuinely major topics, and put the smaller
+  news items in "quick_hits" (one crisp takeaway each) rather than inflating
+  them. Judge which topics are major vs minor from how much time and substance
+  the hosts actually give them.
+Let the overall length scale with how much substance the episode really had —
+do not pad a thin episode or crush a rich one.
 
-PART 2 — Key insights, quotes & takeaways: 10 to 15 items. Some are near-verbatim
-memorable quotes (set is_quote=true), others are concept labels (is_quote=false).
-Each has a 1-3 sentence explanation.
+Produce these fields:
 
-PART 3 — Books & resources mentioned: genuine editorial resources that were
-discussed as part of the content — books, papers, studies, tools, companies,
-products, or people. Give title, author (empty string if none), and a one-to-two
-sentence description. If you are not fully certain something was referenced, say
-so in the description (e.g. "likely referenced"). If none, use an empty list.
-  EXCLUDE ADVERTISING. Do NOT list the episode's sponsors, ad-reads, paid
-  promotions, or product plugs — anything presented in a "this episode is
-  brought to you by ..." / sponsored-segment style. Part 3 is only for things
-  discussed as editorial substance, never for advertising, even if a sponsor's
-  product sounds relevant.
+- "deep_dives": the major topics. Each has a short punchy heading and one rich
+  paragraph that explains the core idea, keeps concrete specifics (names,
+  numbers, companies, models, studies, examples), and may end with a brief,
+  grounded "why it matters". Use as many as the episode's major topics warrant.
 
-Also write "theme": a ~50-word teaser capturing the episode's throughline, and
-"header.guests": the guest/host names you can identify from the transcript
-(empty string if unclear). Do NOT invent facts not supported by the transcript.
+- "quick_hits": minor items / short news mentions that deserve recording but
+  not a deep dive. Each is a short "topic" plus a one-line "takeaway". Use an
+  empty list for a conversational episode that has no such minor items.
+
+- "insights": the memorable quotes and key takeaways. For a near-verbatim quote
+  set is_quote=true and put the quote in "text"; for a concept/label set
+  is_quote=false. Each gets a 1-3 sentence "explanation". Keep quotes in the
+  speaker's own words. Use as many as the episode genuinely offers.
+
+- "actions": things the listener could act on. kind="apply" for a concrete
+  tactic, idea, technique, or workflow they could put into practice; kind="read"
+  for a specific book/article/paper worth following up on (a short curated
+  shortlist, not every resource). Empty list if there's nothing actionable.
+
+- "resources": the full catalogue of things named worth remembering — books,
+  papers, studies, tools, companies, products, people. title, author (empty if
+  none), and a one-to-two sentence description; if unsure it was referenced,
+  say "likely referenced" in the description. Empty list if none.
+  EXCLUDE ADVERTISING: never list the episode's sponsors, ad-reads, paid
+  promotions, or product plugs (anything in a "brought to you by ..." /
+  sponsored-segment style), even if the product sounds relevant.
+
+- "tags": 4-8 short lowercase topic tags for later filtering, in the summary's
+  language (e.g. "ai-modellen", "robotica", "auteursrecht").
+
+- "theme": a ~50-word teaser capturing the episode's throughline.
+- "guests": the guest/host names you can identify (empty string if unclear).
 """
 
 _SCHEMA_BLOCK = """\
@@ -88,10 +119,13 @@ Return ONLY a JSON object (no prose, no markdown fences) with exactly these keys
 {
   "language": "<iso code>",
   "theme": "<~50 words>",
-  "header": { "guests": "<names or empty>" },
-  "part1": [ { "heading": "<...>", "body": "<...>" } ],
-  "part2": [ { "text": "<quote or label>", "is_quote": true, "explanation": "<...>" } ],
-  "part3": [ { "title": "<...>", "author": "<...>", "description": "<...>" } ]
+  "guests": "<names or empty>",
+  "tags": ["<topic>", "..."],
+  "deep_dives": [ { "heading": "<...>", "body": "<...>" } ],
+  "quick_hits": [ { "topic": "<...>", "takeaway": "<...>" } ],
+  "insights": [ { "text": "<quote or label>", "is_quote": true, "explanation": "<...>" } ],
+  "actions": [ { "kind": "apply", "text": "<...>" } ],
+  "resources": [ { "title": "<...>", "author": "<...>", "description": "<...>" } ]
 }"""
 
 
@@ -137,13 +171,20 @@ def _parse_summary_json(raw: str, *, fallback_language: str | None) -> Summary:
             text = text[start:end + 1]
 
     data = json.loads(text)
+    # "guests" may arrive top-level or (from older prompts) nested in "header".
+    guests = data.get("guests")
+    if not guests and isinstance(data.get("header"), dict):
+        guests = data["header"].get("guests", "")
     return Summary(
         language=data.get("language") or fallback_language or "unknown",
         theme=data.get("theme", ""),
-        header=data.get("header", {}) or {},
-        part1=data.get("part1", []) or [],
-        part2=data.get("part2", []) or [],
-        part3=data.get("part3", []) or [],
+        guests=guests or "",
+        tags=data.get("tags", []) or [],
+        deep_dives=data.get("deep_dives", []) or [],
+        quick_hits=data.get("quick_hits", []) or [],
+        insights=data.get("insights", []) or [],
+        actions=data.get("actions", []) or [],
+        resources=data.get("resources", []) or [],
     )
 
 

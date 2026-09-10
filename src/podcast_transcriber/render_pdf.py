@@ -2,39 +2,57 @@
 
 We use **fpdf2**: pure-Python, no system libraries, so it runs identically on
 Windows and on the Raspberry Pi (unlike HTML-to-PDF tools that need heavy
-native deps). The layout mirrors the example: a title block, three PART
-sections with colored header bars, bold sub-headings, and a numbered
-resources list.
+native deps). The layout is fixed in code — the model only supplies content —
+so every summary looks the same regardless of what the model returns.
 
-One portability note, stated honestly: the built-in PDF fonts only cover the
-Latin-1 character set. Dutch accented letters (é, ë, ï, …) are all inside it,
-so ordinary Dutch text renders fine. But "smart" typography — curly quotes,
-em-dashes, ellipses — is not, so we substitute plain equivalents before
-drawing. It's a small typographic downgrade, not a content loss; we can embed
-a full Unicode font later if you want the fancier punctuation back.
+Sections (any empty one is skipped):
+  Theme blurb → Tags → Deep dives → Quick hits → Insights & quotes →
+  To apply & explore → Resources.
+
+Honest portability note: the built-in PDF fonts cover only Latin-1. Dutch
+accented letters (é, ë, ï, …) are inside it, so ordinary Dutch text renders
+fine; "smart" typography (curly quotes, em-dashes) is not, so we substitute
+plain equivalents before drawing. A small typographic downgrade, not a content
+loss; we can embed a full Unicode font later if desired.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from fpdf import FPDF
 
 from .summarize import Summary
 
 # Colors (RGB)
-_ACCENT = (13, 71, 82)      # dark teal for part bars and headings
+_ACCENT = (13, 71, 82)      # dark teal for section bars and headings
 _MUTED = (110, 110, 110)    # gray for meta / footer text
 _INK = (30, 30, 30)         # near-black body text
 
-# Map characters the core fonts can't draw to safe equivalents.
+# Section labels, localized to the summary's language (Dutch or English). These
+# are navigational chrome set by our code, not by the model.
+_LABELS = {
+    "en": {
+        "deep_dives": "DEEP DIVES",
+        "quick_hits": "QUICK HITS",
+        "insights": "KEY INSIGHTS & QUOTES",
+        "actions": "TO APPLY & EXPLORE",
+        "resources": "RESOURCES & REFERENCES",
+        "apply": "Apply", "read": "Read", "tags": "Tags", "with": "with",
+    },
+    "nl": {
+        "deep_dives": "VERDIEPING",
+        "quick_hits": "KORT NIEUWS",
+        "insights": "INZICHTEN & CITATEN",
+        "actions": "OM TOE TE PASSEN & TE VERKENNEN",
+        "resources": "BRONNEN & VERWIJZINGEN",
+        "apply": "Toepassen", "read": "Lezen", "tags": "Tags", "met": "met",
+    },
+}
+
 _SUBS = {
-    "—": "-", "–": "-",           # em/en dash
-    "‘": "'", "’": "'",           # curly single quotes
-    "“": '"', "”": '"',           # curly double quotes
-    "…": "...", "•": "-",          # ellipsis, bullet
-    " ": " ", "​": "",             # nbsp, zero-width space
+    "—": "-", "–": "-", "‘": "'", "’": "'", "“": '"', "”": '"',
+    "…": "...", "•": "-", " ": " ", "​": "",
 }
 
 
@@ -44,7 +62,6 @@ def _san(text: str) -> str:
         return ""
     for bad, good in _SUBS.items():
         text = text.replace(bad, good)
-    # Anything still outside Latin-1 becomes '?', so we never crash on a stray glyph.
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
@@ -58,7 +75,7 @@ class _PodcastPDF(FPDF):
         self.cell(0, 10, _san(self.footer_text), align="C")
 
 
-def _part_bar(pdf: _PodcastPDF, title: str) -> None:
+def _bar(pdf: _PodcastPDF, title: str) -> None:
     pdf.ln(3)
     pdf.set_fill_color(*_ACCENT)
     pdf.set_text_color(255, 255, 255)
@@ -73,17 +90,20 @@ def _heading(pdf: _PodcastPDF, text: str) -> None:
     pdf.multi_cell(0, 6, _san(text), new_x="LMARGIN", new_y="NEXT")
 
 
-def _body(pdf: _PodcastPDF, text: str) -> None:
+def _body(pdf: _PodcastPDF, text: str, *, gap: float = 1.5) -> None:
     pdf.set_text_color(*_INK)
     pdf.set_font("Helvetica", "", 10.5)
     pdf.multi_cell(0, 5.4, _san(text), new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(1.5)
+    pdf.ln(gap)
 
 
 def render_summary_pdf(summary: Summary, *, show_name: str, episode_title: str,
                        date: str = "", episode_number: str = "",
                        out_path: Path, backend: str = "") -> Path:
     """Write the summary to a PDF at out_path and return it."""
+    lang = "nl" if (summary.language or "").lower().startswith("nl") else "en"
+    L = _LABELS[lang]
+
     pdf = _PodcastPDF(format="A4", unit="mm")
     ep = f"#{episode_number}" if episode_number else ""
     pdf.footer_text = " | ".join(
@@ -100,43 +120,87 @@ def render_summary_pdf(summary: Summary, *, show_name: str, episode_title: str,
     pdf.set_text_color(*_INK)
     pdf.set_font("Helvetica", "B", 13)
     pdf.multi_cell(0, 6.5, _san(episode_title), new_x="LMARGIN", new_y="NEXT")
-    guests = (summary.header or {}).get("guests", "")
-    if guests:
+    if summary.guests:
         pdf.set_font("Helvetica", "I", 10.5)
         pdf.set_text_color(*_MUTED)
-        pdf.multi_cell(0, 6, _san(f"with {guests}"), new_x="LMARGIN", new_y="NEXT")
+        pdf.multi_cell(0, 6, _san(f"{L.get('with', 'with')} {summary.guests}"),
+                       new_x="LMARGIN", new_y="NEXT")
     meta = " | ".join(p for p in (f"Episode {ep}" if ep else "", date) if p)
     if meta:
         pdf.set_font("Helvetica", "", 9.5)
         pdf.set_text_color(*_MUTED)
         pdf.multi_cell(0, 5, _san(meta), new_x="LMARGIN", new_y="NEXT")
 
-    # --- PART 1 ---
-    _part_bar(pdf, "PART 1 - EPISODE SUMMARY")
-    for item in summary.part1:
-        _heading(pdf, item.get("heading", ""))
-        _body(pdf, item.get("body", ""))
+    # --- Theme blurb (a skimmable "in short") ---
+    if summary.theme:
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "I", 10.5)
+        pdf.set_text_color(*_INK)
+        pdf.multi_cell(0, 5.4, _san(summary.theme), new_x="LMARGIN", new_y="NEXT")
 
-    # --- PART 2 ---
-    _part_bar(pdf, "PART 2 - KEY INSIGHTS, QUOTES & TAKEAWAYS")
-    for item in summary.part2:
-        label = item.get("text", "")
-        if item.get("is_quote"):
-            label = f'"{label}"'
-        _heading(pdf, label)
-        _body(pdf, item.get("explanation", ""))
+    # --- Tags ---
+    if summary.tags:
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "B", 9.5)
+        pdf.set_text_color(*_ACCENT)
+        pdf.multi_cell(0, 5, _san(f"{L['tags']}: " + "  ·  ".join(summary.tags)),
+                       new_x="LMARGIN", new_y="NEXT")
 
-    # --- PART 3 ---
-    if summary.part3:
-        _part_bar(pdf, "PART 3 - BOOKS & RESOURCES MENTIONED")
-        for i, item in enumerate(summary.part3, start=1):
-            title = item.get("title", "")
-            _heading(pdf, f"{i}. {title}")
+    # --- Deep dives ---
+    if summary.deep_dives:
+        _bar(pdf, L["deep_dives"])
+        for item in summary.deep_dives:
+            _heading(pdf, item.get("heading", ""))
+            _body(pdf, item.get("body", ""))
+
+    # --- Quick hits ---
+    if summary.quick_hits:
+        _bar(pdf, L["quick_hits"])
+        for item in summary.quick_hits:
+            topic = item.get("topic", "")
+            take = item.get("takeaway", "")
+            pdf.set_font("Helvetica", "B", 10.5)
+            pdf.set_text_color(*_INK)
+            pdf.multi_cell(0, 5.4, _san(f"- {topic}"), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", "", 10.5)
+            pdf.multi_cell(0, 5.4, _san(f"   {take}"), new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(1)
+
+    # --- Insights & quotes ---
+    if summary.insights:
+        _bar(pdf, L["insights"])
+        for item in summary.insights:
+            label = item.get("text", "")
+            if item.get("is_quote"):
+                label = f'"{label}"'
+            _heading(pdf, label)
+            _body(pdf, item.get("explanation", ""))
+
+    # --- To apply & explore ---
+    if summary.actions:
+        _bar(pdf, L["actions"])
+        for item in summary.actions:
+            tag = L.get(item.get("kind", "apply"), L["apply"])
+            pdf.set_font("Helvetica", "B", 10.5)
+            pdf.set_text_color(*_ACCENT)
+            pdf.cell(pdf.get_string_width(_san(f"[{tag}] ")) + 1, 5.4,
+                     _san(f"[{tag}]"), new_x="RIGHT", new_y="TOP")
+            pdf.set_font("Helvetica", "", 10.5)
+            pdf.set_text_color(*_INK)
+            pdf.multi_cell(0, 5.4, _san(" " + item.get("text", "")),
+                           new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(1)
+
+    # --- Resources ---
+    if summary.resources:
+        _bar(pdf, L["resources"])
+        for i, item in enumerate(summary.resources, start=1):
+            _heading(pdf, f"{i}. {item.get('title', '')}")
             author = item.get("author", "")
             if author:
                 pdf.set_font("Helvetica", "I", 10)
                 pdf.set_text_color(*_MUTED)
-                pdf.multi_cell(0, 5, _san(f"Author: {author}"),
+                pdf.multi_cell(0, 5, _san(f"{author}"),
                                new_x="LMARGIN", new_y="NEXT")
             _body(pdf, item.get("description", ""))
 
