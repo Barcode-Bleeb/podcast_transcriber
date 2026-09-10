@@ -28,6 +28,11 @@ Run everything from the project root.
         Writes transcripts/<id>.txt (+ .segments.json). Slow but not
         time-sensitive. Overrides: --id, --model, --language.
 
+    python -m podcast_transcriber summarize
+        Stage 4. Summarize the oldest transcribed episode into your 3-section
+        format via an LLM (Gemini by default). Writes summaries/<id>.json and
+        <id>.pdf. Overrides: --id, --backend, --model.
+
     python -m podcast_transcriber fetch --raw
         DIAGNOSTIC ONLY. Dump recently-played to prove auth works and to
         re-check whether Spotify ever starts including episodes there (it
@@ -44,7 +49,8 @@ from pathlib import Path
 
 import json as _json
 
-from . import audio_fetch, config, feed_finder, spotify_client, transcribe
+from . import (audio_fetch, config, feed_finder, render_pdf, spotify_client,
+               summarize, transcribe)
 from .store import EpisodeStore
 
 
@@ -274,6 +280,73 @@ def _cmd_transcribe(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_summarize(args: argparse.Namespace) -> int:
+    store = EpisodeStore(config.EPISODES_FILE)
+
+    if args.id:
+        episode = store.get(args.id)
+    else:
+        todo = [e for e in store.pending()
+                if e.get("transcript_path") and not e.get("summary_pdf_path")]
+        todo.sort(key=lambda e: e.get("first_detected", ""))
+        episode = todo[0] if todo else None
+
+    if episode is None:
+        print("Nothing to summarize (need an episode with a transcript and no "
+              "summary). Run `transcribe` first, or pass --id.")
+        return 1
+
+    transcript_path = Path(episode.get("transcript_path", ""))
+    if not transcript_path.exists():
+        print(f"Transcript file missing: {transcript_path}\nRe-run `transcribe`.")
+        return 1
+
+    ep_id = episode["episode_id"]
+    transcript = transcript_path.read_text(encoding="utf-8")
+    print(f"Summarizing: {episode.get('show_name')} — {episode.get('title')}")
+    print(f"Backend={config.SUMMARY_BACKEND}  (~{len(transcript.split())} words in)")
+
+    try:
+        summary = summarize.summarize_transcript(
+            transcript,
+            show_name=episode.get("show_name", ""),
+            episode_title=episode.get("title", ""),
+            language=episode.get("language"),
+            backend=args.backend,
+            model=args.model,
+        )
+    except (RuntimeError, NotImplementedError, ValueError) as exc:
+        print(f"\nSummarize failed.\n{exc}")
+        return 1
+
+    config.SUMMARIES_DIR.mkdir(parents=True, exist_ok=True)
+    json_path = config.SUMMARIES_DIR / f"{ep_id}.json"
+    pdf_path = config.SUMMARIES_DIR / f"{ep_id}.pdf"
+
+    json_path.write_text(
+        _json.dumps(summary.__dict__, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    render_pdf.render_summary_pdf(
+        summary,
+        show_name=episode.get("show_name", ""),
+        episode_title=episode.get("title", ""),
+        date=episode.get("release_date", "") or "",
+        episode_number=str(episode.get("episode_number", "") or ""),
+        out_path=pdf_path,
+        backend=config.SUMMARY_BACKEND,
+    )
+
+    print(f"Sections: part1={len(summary.part1)} part2={len(summary.part2)} "
+          f"part3={len(summary.part3)}  language={summary.language}")
+    print(f"Theme: {summary.theme[:120]}{'…' if len(summary.theme) > 120 else ''}")
+    print(f"PDF  -> {pdf_path}")
+    store.update(ep_id, summary_json_path=str(json_path),
+                 summary_pdf_path=str(pdf_path), theme=summary.theme)
+    print("Ledger updated. Ready for Stage 5 (deliver).")
+    return 0
+
+
 def _cmd_fetch(args: argparse.Namespace) -> int:
     items = spotify_client.fetch_recently_played(limit=args.limit)
     print(f"Spotify returned {len(items)} recently-played item(s).")
@@ -347,6 +420,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_tr.add_argument("--model", help="Whisper model size override (e.g. small, medium).")
     p_tr.add_argument("--language", help="Force language code (e.g. nl); default auto-detect.")
     p_tr.set_defaults(func=_cmd_transcribe)
+
+    p_sum = sub.add_parser("summarize", help="Summarize a transcript into a PDF.")
+    p_sum.add_argument("--id", help="Episode ID (default: oldest with transcript, no summary).")
+    p_sum.add_argument("--backend", help="Override summary backend (gemini/claude/ollama).")
+    p_sum.add_argument("--model", help="Override the model name.")
+    p_sum.set_defaults(func=_cmd_summarize)
 
     p_fetch = sub.add_parser("fetch", help="Diagnostic: dump recently-played.")
     p_fetch.add_argument("--limit", type=int, default=50,

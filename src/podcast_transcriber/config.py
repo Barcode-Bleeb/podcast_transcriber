@@ -67,6 +67,21 @@ WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "") or None
 
 
+# --- Summarize (Stage 4) --------------------------------------------------
+# Generated summaries (JSON + PDF) land here.
+SUMMARIES_DIR = PROJECT_ROOT / "summaries"
+
+# Which LLM turns a transcript into the 3-section summary. "gemini" uses
+# Google's free API tier; "claude" and "ollama" are reserved for later.
+SUMMARY_BACKEND = os.getenv("SUMMARY_BACKEND", "gemini")
+# Google AI Studio free API key (https://aistudio.google.com/apikey). Free,
+# no billing. Kept out of code — set it in .env.
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+# Gemini model. The exact free-tier model names change over time; override via
+# env if this default is unavailable for your key.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+
 # --- Spotify credentials ---------------------------------------------------
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")

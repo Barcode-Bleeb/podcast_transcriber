@@ -13,7 +13,7 @@ Built and tested on a PC first; eventual home is an always-on Raspberry Pi 5.
 | 1 | **Trigger** — poll Spotify *now-playing* for episodes, queue + dedupe | 🟢 working (this checkpoint) |
 | 2 | **Fetch** — find the show's RSS feed, download the audio | 🟢 built (verify on your machine) |
 | 3 | **Transcribe** — local Whisper (`small`), pluggable backend | 🟢 built (verify on your machine) |
-| 4 | **Summarize** — 3-section format → PDF | ⚪ not started |
+| 4 | **Summarize** — 3-section format → PDF (Gemini, pluggable) | 🟢 built (verify on your machine) |
 | 5 | **Deliver** — email PDF + create Notion page | ⚪ not started |
 
 ## Stage 1 quick start
@@ -69,6 +69,21 @@ pluggable via `WHISPER_BACKEND`: `faster-whisper` on a PC now, `whisper.cpp` on
 the Pi later. Model, device, compute type and language are env-tunable
 (`WHISPER_MODEL`, `WHISPER_LANGUAGE=nl`, …).
 
+## Stage 4 — summarize into your 3-section PDF
+
+```bash
+pip install -e ".[summarize]"                    # adds the Gemini SDK
+# set GEMINI_API_KEY in .env  (free: https://aistudio.google.com/apikey)
+python -m podcast_transcriber summarize          # oldest transcribed episode
+```
+
+Sends the transcript to an LLM (Gemini free tier by default) with a prompt that
+produces the three-part format — topic summary, key insights/quotes, books &
+resources — as JSON, then renders `summaries/<id>.pdf` with fpdf2 (pure-Python,
+Pi-friendly). Summaries are written in the podcast's own language. Backend is
+pluggable via `SUMMARY_BACKEND` (Gemini now; Claude/Ollama reservable later).
+See [`docs/gemini-setup.md`](docs/gemini-setup.md).
+
 ## Layout
 
 ```
@@ -79,6 +94,8 @@ src/podcast_transcriber/
   feed_finder.py      # show name -> RSS feed via Apple's directory
   audio_fetch.py      # parse feed, match episode, download audio
   transcribe.py       # pluggable Whisper backend (faster-whisper / whisper.cpp)
+  summarize.py        # pluggable LLM backend -> structured 3-section summary
+  render_pdf.py       # lay out the summary as a styled PDF (fpdf2)
   __main__.py         # `python -m podcast_transcriber ...` CLI
 data/                 # local runtime data (git-ignored: tokens, ledger, dumps)
 docs/                 # setup guides

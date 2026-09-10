@@ -1,0 +1,169 @@
+"""Turn a transcript into a structured 3-section summary (Stage 4).
+
+This is the "brain" step: it feeds the full transcript to a language model with
+a careful prompt, and gets back a structured summary matching your established
+format:
+
+  PART 1 - Episode summary  : ~8-12 topic sections, 600-900 words total
+  PART 2 - Key insights/quotes : 10-15 items, each with a short explanation
+  PART 3 - Books & resources   : title + author + description
+
+Design mirrors the transcriber: one function, `summarize_transcript()`, hides
+which model did the work behind a pluggable backend. Right now that's Google
+**Gemini** (free tier). "claude" and "ollama" backends are reserved for later.
+
+We ask the model for **JSON** (not prose) so the PDF renderer can lay out each
+piece precisely — the model writes the words, our code owns the layout. The
+summary is written in the podcast's own language (so Dutch stays Dutch and the
+quotes remain the speakers' actual words).
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+from . import config
+
+
+@dataclass
+class Summary:
+    language: str
+    theme: str                       # ~50-word teaser (opens the delivery email)
+    header: dict[str, Any]           # guests, etc. (show/title/date come from the ledger)
+    part1: list[dict[str, str]] = field(default_factory=list)  # {heading, body}
+    part2: list[dict[str, Any]] = field(default_factory=list)  # {text, is_quote, explanation}
+    part3: list[dict[str, str]] = field(default_factory=list)  # {title, author, description}
+
+
+def build_prompt(transcript: str, *, show_name: str, episode_title: str,
+                 language: str | None) -> str:
+    """Construct the instruction sent to the model."""
+    lang_clause = (
+        f"Write the ENTIRE summary in this language (ISO code): {language}. "
+        if language and language != "unknown"
+        else "Write the summary in the SAME language the transcript is in. "
+    )
+    # The prompt is deliberately explicit about structure and about NOT
+    # inventing content — matching the judicious tone of the user's example
+    # (which flags uncertain references with "(likely referenced)").
+    return f"""You are an expert podcast note-taker. Summarize the transcript \
+below into a structured JSON object. {lang_clause}
+
+Podcast: {show_name}
+Episode: {episode_title}
+
+Match this exact three-part structure:
+
+PART 1 — Episode summary: 8 to 12 thematic sections. Each has a short, punchy \
+heading and one rich paragraph. Together the paragraphs total 600–900 words. \
+Preserve concrete details: named studies, numbers, vivid examples, frameworks.
+
+PART 2 — Key insights, quotes & takeaways: 10 to 15 items. Some are near-verbatim \
+memorable quotes (set is_quote=true), others are concept labels (is_quote=false). \
+Each has a 1–3 sentence explanation.
+
+PART 3 — Books & resources mentioned: every book, author, tool, study, or resource \
+named. Give title, author (empty string if none), and a one–two sentence \
+description. If you are not fully certain something was referenced, say so inside \
+the description (e.g. "likely referenced"). If none are mentioned, use an empty list.
+
+Also write "theme": a ~50-word teaser capturing the episode's throughline, and \
+"header.guests": the guest/host names you can identify from the transcript \
+(empty string if unclear). Do NOT invent facts not supported by the transcript.
+
+Return ONLY a JSON object with exactly these keys:
+{{
+  "language": "<iso code>",
+  "theme": "<~50 words>",
+  "header": {{ "guests": "<names or empty>" }},
+  "part1": [ {{ "heading": "<...>", "body": "<...>" }} ],
+  "part2": [ {{ "text": "<quote or label>", "is_quote": true, "explanation": "<...>" }} ],
+  "part3": [ {{ "title": "<...>", "author": "<...>", "description": "<...>" }} ]
+}}
+
+TRANSCRIPT:
+{transcript}
+"""
+
+
+def _parse_summary_json(raw: str, *, fallback_language: str | None) -> Summary:
+    """Parse the model's JSON reply into a Summary, tolerating stray wrapping.
+
+    Models sometimes wrap JSON in ```json fences or add a stray sentence; we
+    extract the outermost {...} block before parsing so those don't break us.
+    """
+    text = raw.strip()
+    if "```" in text:
+        text = re.sub(r"^```[a-zA-Z]*\n?|\n?```$", "", text.strip())
+    # Fall back to slicing the first { to the last } if there's extra prose.
+    if not text.startswith("{"):
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end != -1:
+            text = text[start:end + 1]
+
+    data = json.loads(text)
+    return Summary(
+        language=data.get("language") or fallback_language or "unknown",
+        theme=data.get("theme", ""),
+        header=data.get("header", {}) or {},
+        part1=data.get("part1", []) or [],
+        part2=data.get("part2", []) or [],
+        part3=data.get("part3", []) or [],
+    )
+
+
+def summarize_transcript(transcript: str, *, show_name: str, episode_title: str,
+                         language: str | None = None, backend: str | None = None,
+                         model: str | None = None) -> Summary:
+    """Summarize a transcript using the configured backend."""
+    if not transcript.strip():
+        raise ValueError("Transcript is empty — nothing to summarize.")
+    backend = backend or config.SUMMARY_BACKEND
+    prompt = build_prompt(transcript, show_name=show_name,
+                          episode_title=episode_title, language=language)
+
+    if backend == "gemini":
+        raw = _call_gemini(prompt, model=model or config.GEMINI_MODEL)
+    elif backend in ("claude", "ollama"):
+        raise NotImplementedError(
+            f"The {backend!r} summary backend isn't wired up yet. "
+            "Use SUMMARY_BACKEND=gemini for now."
+        )
+    else:
+        raise ValueError(f"Unknown SUMMARY_BACKEND: {backend!r}")
+
+    return _parse_summary_json(raw, fallback_language=language)
+
+
+def _call_gemini(prompt: str, *, model: str) -> str:
+    """Send the prompt to Gemini and return the raw text (expected: JSON)."""
+    if not config.GEMINI_API_KEY:
+        raise RuntimeError(
+            "GEMINI_API_KEY is not set. Get a free key at "
+            "https://aistudio.google.com/apikey and add it to your .env. "
+            "See docs/gemini-setup.md."
+        )
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError as exc:  # pragma: no cover - depends on optional install
+        raise RuntimeError(
+            "The Gemini SDK isn't installed. Install the optional extra:\n"
+            '    pip install -e ".[summarize]"'
+        ) from exc
+
+    client = genai.Client(api_key=config.GEMINI_API_KEY)
+    # response_mime_type asks Gemini to emit JSON directly, which pairs with our
+    # JSON-shaped prompt for reliable parsing.
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.4,
+        ),
+    )
+    return response.text or ""
