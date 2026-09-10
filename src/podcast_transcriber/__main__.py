@@ -23,6 +23,11 @@ Run everything from the project root.
         match the episode, and download its audio into audio/. Overrides:
         --id, --show, --feed-url, --audio-url, --yes.
 
+    python -m podcast_transcriber transcribe
+        Stage 3. Transcribe the oldest downloaded episode with local Whisper.
+        Writes transcripts/<id>.txt (+ .segments.json). Slow but not
+        time-sensitive. Overrides: --id, --model, --language.
+
     python -m podcast_transcriber fetch --raw
         DIAGNOSTIC ONLY. Dump recently-played to prove auth works and to
         re-check whether Spotify ever starts including episodes there (it
@@ -35,8 +40,11 @@ import argparse
 import json
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
-from . import audio_fetch, config, feed_finder, spotify_client
+import json as _json
+
+from . import audio_fetch, config, feed_finder, spotify_client, transcribe
 from .store import EpisodeStore
 
 
@@ -193,6 +201,79 @@ def _cmd_download(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fmt_hms(seconds: float) -> str:
+    s = int(seconds)
+    return f"{s // 3600:d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
+
+def _cmd_transcribe(args: argparse.Namespace) -> int:
+    store = EpisodeStore(config.EPISODES_FILE)
+
+    # Pick target: explicit --id, else oldest episode that has audio but no
+    # transcript yet.
+    if args.id:
+        episode = store.get(args.id)
+    else:
+        todo = [e for e in store.pending()
+                if e.get("audio_path") and not e.get("transcript_path")]
+        todo.sort(key=lambda e: e.get("first_detected", ""))
+        episode = todo[0] if todo else None
+
+    if episode is None:
+        print("Nothing to transcribe (need an episode with audio and no "
+              "transcript). Run `download` first, or pass --id.")
+        return 1
+
+    audio_path = Path(episode.get("audio_path", ""))
+    if not audio_path.exists():
+        print(f"Audio file missing on disk: {audio_path}\nRe-run `download`.")
+        return 1
+
+    ep_id = episode["episode_id"]
+    print(f"Transcribing: {episode.get('show_name')} — {episode.get('title')}")
+    print(f"Backend={config.WHISPER_BACKEND}  model={args.model or config.WHISPER_MODEL}"
+          f"  (this can take many minutes; progress below)")
+
+    # Live progress: overwrite one line so the terminal stays tidy.
+    last = {"pct": -1}
+
+    def _progress(done: float, total: float) -> None:
+        pct = int(done / total * 100) if total else 0
+        if pct != last["pct"]:
+            last["pct"] = pct
+            print(f"\r  {pct:3d}%  ({_fmt_hms(done)} / {_fmt_hms(total)})",
+                  end="", flush=True)
+
+    try:
+        result = transcribe.transcribe_file(
+            audio_path, model=args.model, language=args.language,
+            progress=_progress,
+        )
+    except (RuntimeError, NotImplementedError, ValueError) as exc:
+        print(f"\nTranscription failed.\n{exc}")
+        return 1
+    print()  # end the progress line
+
+    config.TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
+    txt_path = config.TRANSCRIPTS_DIR / f"{ep_id}.txt"
+    seg_path = config.TRANSCRIPTS_DIR / f"{ep_id}.segments.json"
+    txt_path.write_text(result.text, encoding="utf-8")
+    seg_path.write_text(
+        _json.dumps([s.__dict__ for s in result.segments],
+                    indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    words = len(result.text.split())
+    print(f"Detected language: {result.language}   words: {words}")
+    print(f"Transcript -> {txt_path}")
+    store.update(ep_id, transcript_path=str(txt_path),
+                 transcript_segments_path=str(seg_path),
+                 language=result.language)
+    print("Ledger updated. Ready for Stage 4 (summarize).")
+    return 0
+
+
 def _cmd_fetch(args: argparse.Namespace) -> int:
     items = spotify_client.fetch_recently_played(limit=args.limit)
     print(f"Spotify returned {len(items)} recently-played item(s).")
@@ -260,6 +341,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_dl.add_argument("--yes", action="store_true",
                       help="Accept the best match even if confidence is low.")
     p_dl.set_defaults(func=_cmd_download)
+
+    p_tr = sub.add_parser("transcribe", help="Transcribe a downloaded episode.")
+    p_tr.add_argument("--id", help="Episode ID (default: oldest with audio, no transcript).")
+    p_tr.add_argument("--model", help="Whisper model size override (e.g. small, medium).")
+    p_tr.add_argument("--language", help="Force language code (e.g. nl); default auto-detect.")
+    p_tr.set_defaults(func=_cmd_transcribe)
 
     p_fetch = sub.add_parser("fetch", help="Diagnostic: dump recently-played.")
     p_fetch.add_argument("--limit", type=int, default=50,

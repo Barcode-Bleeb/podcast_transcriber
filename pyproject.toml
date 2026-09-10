@@ -16,6 +16,14 @@ dependencies = [
     "requests>=2.32.0",     # HTTP for feed discovery + audio download.
 ]
 
+[project.optional-dependencies]
+# Stage 3 transcription on a PC. Heavy (compiled) libraries, so kept optional:
+#   pip install -e ".[whisper]"
+# The Raspberry Pi will use whisper.cpp instead and won't need this.
+whisper = [
+    "faster-whisper>=1.0.3",
+]
+
 [project.scripts]
 # Lets you type `podcast-transcriber ...` instead of the longer
 # `python -m podcast_transcriber ...`, once installed.

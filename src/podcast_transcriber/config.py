@@ -45,6 +45,27 @@ AUDIO_DIR = PROJECT_ROOT / "audio"
 # the default "python-requests/..." agent, so we identify ourselves clearly.
 HTTP_USER_AGENT = "podcast-transcriber/0.1 (+personal podcast pipeline)"
 
+# Full-text transcripts (Stage 3) land here, git-ignored (they're derived data).
+TRANSCRIPTS_DIR = PROJECT_ROOT / "transcripts"
+
+
+# --- Transcription (Stage 3) ----------------------------------------------
+# All overridable via environment/.env so the Raspberry Pi can use different
+# settings (e.g. the whisper.cpp backend) without code changes.
+#
+# Backend: "faster-whisper" (easy on a PC) or "whisper.cpp" (for the Pi later).
+WHISPER_BACKEND = os.getenv("WHISPER_BACKEND", "faster-whisper")
+# Model size: tiny / base / small / medium / large-v3. "small" is your chosen
+# accuracy/speed tradeoff for overnight processing.
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
+# CPU is the safe default; set to "cuda" on a machine with an NVIDIA GPU.
+WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
+# int8 keeps memory/CPU low (good for a Pi); "float32" is more accurate but
+# heavier. Only used by the faster-whisper backend.
+WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+# Force a language (e.g. "nl" for Dutch) or leave blank to auto-detect.
+WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "") or None
+
 
 # --- Spotify credentials ---------------------------------------------------
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")

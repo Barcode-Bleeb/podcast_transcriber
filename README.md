@@ -12,7 +12,7 @@ Built and tested on a PC first; eventual home is an always-on Raspberry Pi 5.
 |---|-------|--------|
 | 1 | **Trigger** — poll Spotify *now-playing* for episodes, queue + dedupe | 🟢 working (this checkpoint) |
 | 2 | **Fetch** — find the show's RSS feed, download the audio | 🟢 built (verify on your machine) |
-| 3 | **Transcribe** — local `whisper.cpp`, `small` model | ⚪ not started |
+| 3 | **Transcribe** — local Whisper (`small`), pluggable backend | 🟢 built (verify on your machine) |
 | 4 | **Summarize** — 3-section format → PDF | ⚪ not started |
 | 5 | **Deliver** — email PDF + create Notion page | ⚪ not started |
 
@@ -53,6 +53,22 @@ python -m podcast_transcriber download --audio-url https://…/episode.mp3
 python -m podcast_transcriber download --yes        # accept a low-confidence match
 ```
 
+## Stage 3 — transcribe locally with Whisper
+
+Transcription engines are heavy, so they're an optional install:
+
+```bash
+pip install -e ".[whisper]"                     # adds faster-whisper (PC)
+python -m podcast_transcriber transcribe         # oldest downloaded episode
+```
+
+Writes `transcripts/<id>.txt` plus `<id>.segments.json` (timestamped chunks,
+handy for pulling quotes in Stage 4). It's CPU-bound and slow by design
+(minutes to tens of minutes) — the free/overnight tradeoff. The backend is
+pluggable via `WHISPER_BACKEND`: `faster-whisper` on a PC now, `whisper.cpp` on
+the Pi later. Model, device, compute type and language are env-tunable
+(`WHISPER_MODEL`, `WHISPER_LANGUAGE=nl`, …).
+
 ## Layout
 
 ```
@@ -60,6 +76,9 @@ src/podcast_transcriber/
   config.py           # paths + secrets from environment / .env
   spotify_client.py   # OAuth handshake + now-playing episode detection
   store.py            # JSON episode ledger (queue + processed, deduped)
+  feed_finder.py      # show name -> RSS feed via Apple's directory
+  audio_fetch.py      # parse feed, match episode, download audio
+  transcribe.py       # pluggable Whisper backend (faster-whisper / whisper.cpp)
   __main__.py         # `python -m podcast_transcriber ...` CLI
 data/                 # local runtime data (git-ignored: tokens, ledger, dumps)
 docs/                 # setup guides
