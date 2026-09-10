@@ -80,6 +80,12 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Gemini model. The exact free-tier model names change over time; override via
 # env if this default is unavailable for your key.
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+# Optional editable prompt override. If this file exists, its contents replace
+# the built-in summarization instructions (the fixed JSON schema still applies).
+# Create it with: python -m podcast_transcriber summarize --dump-prompt
+SUMMARY_PROMPT_FILE = os.getenv(
+    "SUMMARY_PROMPT_FILE", str(PROJECT_ROOT / "summary_prompt.txt")
+)
 
 
 # --- Spotify credentials ---------------------------------------------------

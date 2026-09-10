@@ -1,3 +1,6 @@
+# --- Personal customization (kept local so `git pull` never clobbers it) ---
+summary_prompt.txt
+
 # --- Secrets & credentials -------------------------------------------------
 # Never commit your Spotify keys or the cached OAuth token.
 .env

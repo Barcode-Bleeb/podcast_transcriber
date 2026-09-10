@@ -24,6 +24,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from . import config
@@ -44,55 +45,80 @@ class Summary:
     part3: list[dict[str, str]] = field(default_factory=list)  # {title, author, description}
 
 
-def build_prompt(transcript: str, *, show_name: str, episode_title: str,
-                 language: str | None) -> str:
-    """Construct the instruction sent to the model."""
-    lang_clause = (
-        f"Write the ENTIRE summary in this language (ISO code): {language}. "
-        if language and language != "unknown"
-        else "Write the summary in the SAME language the transcript is in. "
-    )
-    # The prompt is deliberately explicit about structure and about NOT
-    # inventing content — matching the judicious tone of the user's example
-    # (which flags uncertain references with "(likely referenced)").
-    return f"""You are an expert podcast note-taker. Summarize the transcript \
-below into a structured JSON object. {lang_clause}
+# --------------------------------------------------------------------------
+# The prompt has two parts:
+#   * DEFAULT_INSTRUCTIONS — the human-editable "how to summarize" guidance
+#     (section counts, tone, what to include/exclude). Safe to rewrite freely.
+#     You can override it without touching code: run `summarize --dump-prompt`
+#     to write it to summary_prompt.txt, edit that file, and it's used instead.
+#   * _SCHEMA_BLOCK — the fixed JSON shape the PDF renderer depends on. This is
+#     NOT editable via the file, so tweaking the instructions can never break
+#     parsing or the layout.
+# --------------------------------------------------------------------------
+DEFAULT_INSTRUCTIONS = """\
+You are an expert podcast note-taker. Summarize the transcript into a structured
+JSON object matching this three-part format.
 
-Podcast: {show_name}
-Episode: {episode_title}
-
-Match this exact three-part structure:
-
-PART 1 — Episode summary: 8 to 12 thematic sections. Each has a short, punchy \
-heading and one rich paragraph. Together the paragraphs total 600–900 words. \
+PART 1 — Episode summary: 8 to 12 thematic sections. Each has a short, punchy
+heading and one rich paragraph. Together the paragraphs total 600-900 words.
 Preserve concrete details: named studies, numbers, vivid examples, frameworks.
 
-PART 2 — Key insights, quotes & takeaways: 10 to 15 items. Some are near-verbatim \
-memorable quotes (set is_quote=true), others are concept labels (is_quote=false). \
-Each has a 1–3 sentence explanation.
+PART 2 — Key insights, quotes & takeaways: 10 to 15 items. Some are near-verbatim
+memorable quotes (set is_quote=true), others are concept labels (is_quote=false).
+Each has a 1-3 sentence explanation.
 
-PART 3 — Books & resources mentioned: every book, author, tool, study, or resource \
-named. Give title, author (empty string if none), and a one–two sentence \
-description. If you are not fully certain something was referenced, say so inside \
-the description (e.g. "likely referenced"). If none are mentioned, use an empty list.
+PART 3 — Books & resources mentioned: genuine editorial resources that were
+discussed as part of the content — books, papers, studies, tools, companies,
+products, or people. Give title, author (empty string if none), and a one-to-two
+sentence description. If you are not fully certain something was referenced, say
+so in the description (e.g. "likely referenced"). If none, use an empty list.
+  EXCLUDE ADVERTISING. Do NOT list the episode's sponsors, ad-reads, paid
+  promotions, or product plugs — anything presented in a "this episode is
+  brought to you by ..." / sponsored-segment style. Part 3 is only for things
+  discussed as editorial substance, never for advertising, even if a sponsor's
+  product sounds relevant.
 
-Also write "theme": a ~50-word teaser capturing the episode's throughline, and \
-"header.guests": the guest/host names you can identify from the transcript \
+Also write "theme": a ~50-word teaser capturing the episode's throughline, and
+"header.guests": the guest/host names you can identify from the transcript
 (empty string if unclear). Do NOT invent facts not supported by the transcript.
+"""
 
-Return ONLY a JSON object with exactly these keys:
-{{
+_SCHEMA_BLOCK = """\
+Return ONLY a JSON object (no prose, no markdown fences) with exactly these keys:
+{
   "language": "<iso code>",
   "theme": "<~50 words>",
-  "header": {{ "guests": "<names or empty>" }},
-  "part1": [ {{ "heading": "<...>", "body": "<...>" }} ],
-  "part2": [ {{ "text": "<quote or label>", "is_quote": true, "explanation": "<...>" }} ],
-  "part3": [ {{ "title": "<...>", "author": "<...>", "description": "<...>" }} ]
-}}
+  "header": { "guests": "<names or empty>" },
+  "part1": [ { "heading": "<...>", "body": "<...>" } ],
+  "part2": [ { "text": "<quote or label>", "is_quote": true, "explanation": "<...>" } ],
+  "part3": [ { "title": "<...>", "author": "<...>", "description": "<...>" } ]
+}"""
 
-TRANSCRIPT:
-{transcript}
-"""
+
+def load_instructions() -> str:
+    """Return the editable instructions — from the override file if it exists,
+    otherwise the built-in default."""
+    path = config.SUMMARY_PROMPT_FILE
+    if path and Path(path).exists():
+        return Path(path).read_text(encoding="utf-8")
+    return DEFAULT_INSTRUCTIONS
+
+
+def build_prompt(transcript: str, *, show_name: str, episode_title: str,
+                 language: str | None) -> str:
+    """Assemble the full prompt: language + metadata + instructions + schema."""
+    lang_clause = (
+        f"Write the ENTIRE summary in this language (ISO code): {language}."
+        if language and language != "unknown"
+        else "Write the summary in the SAME language the transcript is in."
+    )
+    return (
+        f"{lang_clause}\n\n"
+        f"Podcast: {show_name}\nEpisode: {episode_title}\n\n"
+        f"{load_instructions()}\n\n"
+        f"{_SCHEMA_BLOCK}\n\n"
+        f"TRANSCRIPT:\n{transcript}\n"
+    )
 
 
 def _parse_summary_json(raw: str, *, fallback_language: str | None) -> Summary:

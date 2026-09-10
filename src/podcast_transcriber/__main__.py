@@ -281,6 +281,20 @@ def _cmd_transcribe(args: argparse.Namespace) -> int:
 
 
 def _cmd_summarize(args: argparse.Namespace) -> int:
+    # Write the editable instructions to summary_prompt.txt so the user can
+    # tweak wording without touching code, then exit.
+    if args.dump_prompt:
+        path = Path(config.SUMMARY_PROMPT_FILE)
+        if path.exists() and not args.force:
+            print(f"{path} already exists — edit it directly, or pass --force "
+                  "to overwrite with the built-in default.")
+            return 1
+        path.write_text(summarize.DEFAULT_INSTRUCTIONS, encoding="utf-8")
+        print(f"Wrote editable prompt to: {path}\n"
+              "Edit it in a text editor; future summaries use your version. "
+              "(The fixed JSON structure stays in code, so layout can't break.)")
+        return 0
+
     store = EpisodeStore(config.EPISODES_FILE)
 
     if args.id:
@@ -425,6 +439,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_sum.add_argument("--id", help="Episode ID (default: oldest with transcript, no summary).")
     p_sum.add_argument("--backend", help="Override summary backend (gemini/claude/ollama).")
     p_sum.add_argument("--model", help="Override the model name.")
+    p_sum.add_argument("--dump-prompt", action="store_true",
+                       help="Write the editable summary prompt to summary_prompt.txt and exit.")
+    p_sum.add_argument("--force", action="store_true",
+                       help="With --dump-prompt, overwrite an existing summary_prompt.txt.")
     p_sum.set_defaults(func=_cmd_summarize)
 
     p_fetch = sub.add_parser("fetch", help="Diagnostic: dump recently-played.")
