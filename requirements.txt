@@ -1,0 +1,9 @@
+# Stage 1 — Spotify trigger.
+# We deliberately keep the dependency list tiny so it installs cleanly on a
+# Raspberry Pi 5 as well as your PC.
+
+spotipy==2.24.0        # Thin, well-maintained wrapper around Spotify's Web API.
+                       # It handles the OAuth token dance and, crucially, the
+                       # automatic refresh of expired tokens for us.
+python-dotenv==1.0.1   # Loads your secrets from a local .env file into the
+                       # process environment, so keys never live in the code.

@@ -1,0 +1,32 @@
+# --- Secrets & credentials -------------------------------------------------
+# Never commit your Spotify keys or the cached OAuth token.
+.env
+data/.spotify_token_cache.json
+data/*.token.json
+
+# --- Local runtime data ----------------------------------------------------
+# Processed-episode tracking, downloaded audio, transcripts, generated PDFs.
+# These are machine-local; they should not live in git.
+data/processed_episodes.json
+data/raw/
+audio/
+transcripts/
+summaries/
+*.mp3
+*.m4a
+*.wav
+
+# --- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# --- OS / editor -----------------------------------------------------------
+.DS_Store
+*.swp
+.idea/
+.vscode/
