@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "podcast-transcriber"
+version = "0.1.0"
+description = "Detect listened Spotify podcast episodes, transcribe locally, summarize, and deliver."
+requires-python = ">=3.10"
+dependencies = [
+    "spotipy==2.24.0",
+    "python-dotenv==1.0.1",
+]
+
+[project.scripts]
+# Lets you type `podcast-transcriber ...` instead of the longer
+# `python -m podcast_transcriber ...`, once installed.
+podcast-transcriber = "podcast_transcriber.__main__:main"
+
+[tool.setuptools.packages.find]
+# Our package lives under src/ (a "src layout"), which keeps the importable
+# code cleanly separated from config and docs.
+where = ["src"]

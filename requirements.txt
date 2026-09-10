@@ -1,9 +1,11 @@
-# Stage 1 — Spotify trigger.
-# We deliberately keep the dependency list tiny so it installs cleanly on a
-# Raspberry Pi 5 as well as your PC.
+# Installing from this file does two things:
+#   1. installs this project itself (the "-e ." line, an "editable" install),
+#      which is what makes `python -m podcast_transcriber ...` work; and
+#   2. pulls in the third-party libraries it needs (declared in pyproject.toml).
+#
+#   pip install -r requirements.txt
+#
+# We keep the dependency list itself in pyproject.toml so there's a single
+# source of truth; this file just points at it.
 
-spotipy==2.24.0        # Thin, well-maintained wrapper around Spotify's Web API.
-                       # It handles the OAuth token dance and, crucially, the
-                       # automatic refresh of expired tokens for us.
-python-dotenv==1.0.1   # Loads your secrets from a local .env file into the
-                       # process environment, so keys never live in the code.
+-e .
